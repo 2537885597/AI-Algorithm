@@ -179,7 +179,7 @@ def makeMatrix(m, n, fill=0.0):
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-# 函数 sigmoid 的派生函数
+# 函数 sigmoid 的导函数
 def derived_sigmoid(x):
     return sigmoid(x) * (1 - sigmoid(x))
 
@@ -191,32 +191,28 @@ class BPNN:
         self.num_hidden = num_hidden + 1  # 增加 一个偏置节点
         self.num_out = num_out
 
-        # 激活神经网络的所有节点（向量）？
+        # 初始化所有节点的激活状态
         self.active_in = np.array([-1.0] * self.num_in)
         self.active_hidden = np.array([-1.0] * self.num_hidden)
         self.active_out = np.array([1.0] * self.num_out)
 
         # 创建权重矩阵
-        self.weight_in = makeMatrix(self.num_in, self.num_hidden)
+        self.weight_hidden = makeMatrix(self.num_in, self.num_hidden)
         self.weight_out = makeMatrix(self.num_hidden, self.num_out)
 
         # 对权值矩阵赋初值
         for i in range(self.num_in):
             for j in range(self.num_hidden):
-                self.weight_in[i][j] = random_number(-0.1, 0.1)
+                self.weight_hidden[i][j] = random_number(-0.1, 0.1)
         for i in range(self.num_hidden):
             for j in range(self.num_out):
                 self.weight_out[i][j] = random_number(-0.1, 0.1)
 
-        # 偏置
+        # 偏置节点权重
         for j in range(self.num_hidden):
-            self.weight_in[0][j] = random_number(-0.1, 0.1)
+            self.weight_hidden[0][j] = random_number(-0.1, 0.1)
         for j in range(self.num_out):
             self.weight_out[0][j] = random_number(-0.1, 0.1)
-
-        # 最后建立动量因子？
-        self.ci = makeMatrix(self.num_in, self.num_hidden)
-        self.co = makeMatrix(self.num_hidden, self.num_out)
 
     # 信号前向传播
     def forwardPropagation(self, inputs):
@@ -227,9 +223,9 @@ class BPNN:
         self.active_in[1:self.num_in] = inputs
 
         # 数据在隐藏层的处理
-        self.sum_hidden = np.dot(self.weight_in.T, self.active_in)
+        self.sum_hidden = np.dot(self.weight_hidden.T, self.active_in)
         self.active_hidden = sigmoid(self.sum_hidden)
-        self.active_hidden[0] = -1.0
+        self.active_hidden[0] = -1.0   #偏置设为-1
 
         # 数据在输出层的处理
         self.sum_out = np.dot(self.weight_out.T, self.active_hidden)
@@ -237,36 +233,35 @@ class BPNN:
         return self.active_out
 
     # 误差反向传播
-    def backwardPropagation(self, targets, lr, m):
+    def backwardPropagation(self, targets, lr):
         """
+        targets:教师信号
         lr: 学习率
-        m: 动量因子
         """
-        targets = np.array([targets])
+        if self.num_out==1:
+            targets = np.array(targets)
         if len(targets) != self.num_out:
-            raise ValueError('与输出层节点数不符')
+            raise ValueError('与输出层节点数不符！')
 
-        # 误差
-        error = 0.5 * np.sum((targets - self.active_out) ** 2)
+        # 均方误差
+        error=(1/2)*np.dot((targets.reshape(-1,1)-self.active_out).T,(targets.reshape(-1,1)-self.active_out))
 
-        # 输出误差信号？
-        self.error_out = (targets - self.active_out) * derived_sigmoid(self.sum_out)
+        # 输出层误差信号
+        self.error_out = (targets.reshape(-1, 1) - self.active_out) * derived_sigmoid(self.sum_out)
 
-        # 隐层误差信号?
+        # 隐层误差信号
         self.error_hidden = np.dot(self.weight_out, self.error_out) * derived_sigmoid(self.sum_hidden)
 
-        # 更新权重值?
-        # 隐层
-        self.weight_out += lr * np.outer(self.error_out, self.active_hidden).T + m * self.co
-        self.co = lr * np.outer(self.error_out, self.active_hidden).T
+        # 更新权重值
+        # 输出层权重
+        self.weight_out += lr * np.dot(self.active_hidden, self.error_out).T
 
-        # 输入层
-        self.weight_in += lr * np.outer(self.error_hidden, self.active_in).T + m * self.ci
-        self.ci = lr * np.outer(self.error_hidden, self.active_in).T
+        # 隐层权重
+        self.weight_hidden += lr * np.dot(self.error_hidden, self.active_in).T
 
         return error
 
-    # 测试
+    # 测试 直接前向传播得出结果
     def test(self, patterns):
         results = []
         for i in patterns:
@@ -274,45 +269,38 @@ class BPNN:
             targets = i[self.num_in - 1:]
             result = self.forwardPropagation(inputs)
             results.append(result)
-            print(inputs)
-            print('->', result)
-            print('=', targets)
-            print('---')
+            print(f'输入：{inputs:} -> 结果：{result} = 期望：{targets}')
         return results
     
-    # 训练网络
-    def train(self, patterns, iterations=1000, lr=0.1, m=0.1):
-        # lr: 学习速率
-        # m: 动量因子
+    # 训练网络 反向传播调参
+    def train(self, patterns, iterations=1000, lr=0.1):
+        '''
+        lr: 学习速率
+        '''
         for i in range(iterations):
             error = 0.0
             for p in patterns:
                 inputs = p[0:self.num_in - 1]
                 targets = p[self.num_in - 1:]
                 self.forwardPropagation(inputs)
-                error += self.backwardPropagation(targets, lr, m)
+                error += self.backwardPropagation(targets, lr)
             if i % 100 == 0:
-                print('误差 %-.5f' % error)
+                print(f'误差 {error:-.5f}\n')
 
 # 主程序
 def demo():
     # 创建一个神经网络：输入层3个节点，隐藏层5个节点，输出层2个节点
-    nn = BPNN(3, 5, 2)
+    nn = BPNN(21, 10, 1)
+
+    X1=list(np.arange(-1.1,1.1,0.1))
+    X2=list(np.arange(-1.1,1.1,0.1))
 
     # 训练模式
-    patterns = [
-        np.array([0, 0, 0, 0, 0]),
-        np.array([0, 0, 1, 0, 1]),
-        np.array([0, 1, 0, 1, 0]),
-        np.array([0, 1, 1, 1, 1]),
-        np.array([1, 0, 0, 1, 0]),
-        np.array([1, 0, 1, 1, 1]),
-        np.array([1, 1, 0, 1, 1]),
-        np.array([1, 1, 1, 1, 0])
-    ]
+    patterns=[np.array(X1),
+              np.array(X2)]
 
     # 训练神经网络
-    nn.train(patterns, iterations=1000, lr=0.1, m=0.1)
+    nn.train(patterns, iterations=1000, lr=0.1)
 
     # 测试神经网络
     nn.test(patterns)
