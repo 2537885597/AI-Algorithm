@@ -1,2 +1,2 @@
 # AI-Algorithm
-Freak's AI 项目
+Freak's AI Project
